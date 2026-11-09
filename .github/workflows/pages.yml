@@ -1,9 +1,9 @@
 name: Deploy GitHub Pages
 
+# This token cannot create the Pages site (403: pages=write and
+# administration=write). Run this workflow after Settings → Pages → Source
+# is GitHub Actions. Branch publishing from main / does not need this file.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:

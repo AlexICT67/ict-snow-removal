@@ -239,6 +239,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
   #mstats table{font-size:12.5px;margin-top:3px}
   .leaflet-control-attribution{font-size:10px}
 }
+/* plow routes */
+.rcard{margin-top:16px}
+.rtools{display:flex;flex-wrap:wrap;gap:8px}
+.rhelp{font-size:13px;color:var(--mut);margin:8px 0 0}
+.rhelp b{color:var(--ice)}
+#rmapwrap{position:relative;height:400px;border-radius:10px;overflow:hidden;border:1px solid var(--line);margin:10px 0 6px}
+#rmap{position:absolute;inset:0;background:#1b2733}
+#rmapfail{display:none;position:absolute;inset:0;z-index:600;align-items:center;justify-content:center;padding:24px;text-align:center;color:var(--mut);background:var(--bg)}
+#rStatus{font-size:12.5px;color:var(--warn);min-height:1em}
+.rlist{display:grid;gap:10px;margin-top:8px}
+.rrow{background:var(--bg2);border:1px solid var(--line);border-left:6px solid var(--ice);border-radius:10px;padding:10px 12px;display:grid;gap:8px}
+.rrow.editing{border-top-color:var(--ice);border-right-color:var(--ice);border-bottom-color:var(--ice)}
+.rhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rhead .hint{margin-left:auto}
+.rnum{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:#0d1620;font-weight:800;font-size:13px;line-height:1;border:2px solid #0d1620;box-shadow:0 0 0 1.5px rgba(255,255,255,.7)}
+.rcolors{display:flex;gap:8px;flex-wrap:wrap}
+.rsw{width:40px;height:40px;border-radius:50%;border:3px solid var(--bg2);cursor:pointer;box-shadow:0 0 0 1px var(--line2);padding:0;touch-action:manipulation}
+.rsw[aria-pressed=true]{box-shadow:0 0 0 3px #fff}
+.rarr-wrap,.rnum-wrap,.rpile-wrap,.rvtx-wrap{background:none;border:none}
+.rarr{width:100%;height:100%;display:flex;align-items:center;justify-content:center;transform-origin:50% 50%;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.7))}
+.rarr svg{display:block}
+.rpile{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;background:#e6f1f8;color:#0d1620;font-weight:800;font-size:12.5px;padding:4px 9px;border-radius:13px;border:2px solid #0d1620;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.rvtx{width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff;border:2px solid #0d1620}
+.leaflet-tooltip.rtip{background:rgba(13,22,32,.92);color:#e6f1f8;border:1px solid var(--line2);font-weight:600;font-size:12.5px;box-shadow:0 2px 6px rgba(0,0,0,.4);white-space:normal;width:max-content;max-width:210px}
+.leaflet-tooltip-right.rtip:before{border-right-color:rgba(13,22,32,.92)}
+.jroutes{margin-top:8px;display:grid;gap:5px;font-size:13px}
+.jr{display:flex;gap:7px;align-items:flex-start}
+.jr .rnum{width:20px;height:20px;font-size:11px;flex:0 0 auto}
+.jr.mut{color:var(--mut)}
+.jmap{height:250px;border-radius:8px;overflow:hidden;margin-top:8px;border:1px solid var(--line);background:#1b2733}
+.tag.r{background:#3a3214;color:#ffe08a}
+@media (max-width:760px){#rmapwrap{height:340px}.rtools .btn{flex:1 1 calc(50% - 8px)}}
 @media print{.topbar,.nav,.btnrow{display:none}}
 </style>
 </head>
@@ -370,6 +402,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
             <button class="btn bad" type="button" id="qNew">New quote</button>
           </div>
         </div>
+      </div>
+      <div class="card rcard" id="rCard">
+        <h2>Plow routes</h2>
+        <p class="hint" style="margin:-4px 0 10px">Draw which way to push. Arrows show the direction. Routes go to dispatch with the job so the pusher sees them. They don't change sq ft or price.</p>
+        <div class="rtools" role="toolbar" aria-label="Plow route tools">
+          <button class="btn pri" type="button" id="rNew">New route</button>
+          <button class="btn" type="button" id="rUndo">Undo point</button>
+          <button class="btn" type="button" id="rFinish">Finish route</button>
+          <button class="btn" type="button" id="rPile">Mark snow pile</button>
+          <button class="btn" type="button" id="rPileDel">Remove pile</button>
+          <button class="btn" type="button" id="rFit">Fit map</button>
+          <button class="btn bad" type="button" id="rClear">Clear routes</button>
+        </div>
+        <p class="rhelp" id="rHelp"></p>
+        <div id="rmapwrap">
+          <div id="rmap" aria-label="Plow route map. Tap to add route points."></div>
+          <div id="rmapfail">Map library did not load (no network). Route notes below still save with the quote.</div>
+        </div>
+        <div id="rStatus" aria-live="polite"></div>
+        <div class="rlist" id="rList"></div>
       </div>
     </section>
 
@@ -670,8 +722,98 @@ function saveUserFromForm(){
 }
 
 /* ---------- quote state ---------- */
-var QDEF = { cust:'', addr:'', sqft:'', sqftSrc:'', cls:'medium_driveway', hours:1.5, min:0, crew:'Unassigned', travel:true, pri:false, aft:false, salt:false, walk:false, saltHrs:'', walkHrs:'', notes:'' };
+var QDEF = { cust:'', addr:'', sqft:'', sqftSrc:'', cls:'medium_driveway', hours:1.5, min:0, crew:'Unassigned', travel:true, pri:false, aft:false, salt:false, walk:false, saltHrs:'', walkHrs:'', notes:'', routes:[], pile:null, lotPts:null };
+
+/* ---------- plow routes (drawn paths; never affect sq ft or price) ---------- */
+var ROUTE_COLORS = ['#ff5252','#ffd740','#69f0ae','#40c4ff','#e040fb','#ffffff'];
+var ROUTE_CNAMES = { '#ff5252':'red', '#ffd740':'yellow', '#69f0ae':'green', '#40c4ff':'blue', '#e040fb':'purple', '#ffffff':'white' };
+function llOk(p){ return Array.isArray(p) && p.length>=2 && isFinite(p[0]) && isFinite(p[1]) && p[0]!==null && p[1]!==null; }
+function normPts(a){ return Array.isArray(a) ? a.filter(llOk).map(function(p){ return [+p[0], +p[1]]; }) : []; }
+function normRoutes(a, keepShort){
+  if (!Array.isArray(a)) return [];
+  return a.filter(function(r){ return r && typeof r==='object'; }).map(function(r){
+    var c = String(r.color||'').toLowerCase();
+    return { color: ROUTE_COLORS.indexOf(c)>=0 ? c : ROUTE_COLORS[0], label: String(r.label==null?'':r.label).slice(0,200), pts: normPts(r.pts) };
+  }).filter(function(r){ return keepShort || r.pts.length>=2; });
+}
+function normPile(p){ return llOk(p) ? [+p[0], +p[1]] : null; }
+function normLot(a){ var l = normPts(a); return l.length>=3 ? l : null; }
+function routeLenFt(r){
+  if (typeof L==='undefined' || !r || !r.pts || r.pts.length<2) return 0;
+  var d=0; for (var i=1;i<r.pts.length;i++) d += L.latLng(r.pts[i-1]).distanceTo(L.latLng(r.pts[i]));
+  return d*3.28084;
+}
+function routeLines(routes, pile){
+  var L2 = [];
+  (routes||[]).forEach(function(r,i){ L2.push('  ' + (i+1) + '. ' + (r.label ? r.label : 'Route ' + (i+1)) + ' (' + (ROUTE_CNAMES[r.color]||'line') + ' arrows)'); });
+  if (pile) L2.push('  Snow pile: marked on map');
+  return L2;
+}
+function addBaseLayers(map){
+  var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:20, maxNativeZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' });
+  var sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:21, maxNativeZoom:19, attribution:'Imagery &copy; Esri, Maxar, Earthstar Geographics' });
+  (load('layer','sat')==='street' ? street : sat).addTo(map);
+  L.control.layers({ 'Satellite':sat, 'Street':street }, null, { position:'topright' }).addTo(map);
+  map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
+}
+function arrowIcon(color, deg, big){
+  var s = big ? 28 : 20;
+  return L.divIcon({ className:'rarr-wrap', iconSize:[s,s], iconAnchor:[s/2,s/2],
+    html:'<div class="rarr" style="transform:rotate('+deg.toFixed(1)+'deg)"><svg viewBox="0 0 20 20" width="'+s+'" height="'+s+'" aria-hidden="true"><path d="M3 3L18 10L3 17L7 10Z" fill="'+color+'" stroke="#0d1620" stroke-width="1.6" stroke-linejoin="round"/></svg></div>' });
+}
+/* Draws lot outline (context), routes with arrowheads, start numbers, notes and the snow pile. Arrows are re-spaced on zoom. */
+function RouteLayer(map){
+  var g = L.layerGroup().addTo(map), last = null;
+  function mk(ll, icon){ return L.marker(ll, { icon:icon, interactive:false, keyboard:false }).addTo(g); }
+  function arrows(ll, color){
+    var P = ll.map(function(x){ return map.latLngToLayerPoint(x); });
+    var SP = 85, next = 42, acc = 0, lastSeg = null, total = 0, i;
+    for (i=1;i<P.length;i++) total += P[i].distanceTo(P[i-1]);
+    for (i=1;i<P.length;i++){
+      var a=P[i-1], b=P[i], dx=b.x-a.x, dy=b.y-a.y, len=Math.sqrt(dx*dx+dy*dy);
+      if (len < 0.5) continue;
+      var deg = Math.atan2(dy,dx)*180/Math.PI; lastSeg = deg;
+      while (next <= acc+len){
+        if (total - next < 30) break; // leave room for the end arrow
+        var t = (next-acc)/len;
+        mk(map.layerPointToLatLng(L.point(a.x+dx*t, a.y+dy*t)), arrowIcon(color, deg, false));
+        next += SP;
+      }
+      acc += len;
+    }
+    if (lastSeg !== null) mk(ll[ll.length-1], arrowIcon(color, lastSeg, true));
+  }
+  function render(d){
+    last = d; g.clearLayers(); if (!d) return;
+    if (d.lot && d.lot.length>=3) L.polygon(d.lot, { color:'#7fd3ff', weight:2, dashArray:'5 6', fillColor:'#7fd3ff', fillOpacity:.08, interactive:false }).addTo(g);
+    (d.routes||[]).forEach(function(r, i){
+      var ll = r.pts.map(function(p){ return L.latLng(p[0], p[1]); });
+      if (ll.length>=2){
+        L.polyline(ll, { color:'#0d1620', weight:9, opacity:.55, interactive:false, lineCap:'round', lineJoin:'round' }).addTo(g);
+        L.polyline(ll, { color:r.color, weight:5, opacity:.95, interactive:false, lineCap:'round', lineJoin:'round', className:'route-path', dashArray: d.editIdx===i ? '10 7' : null }).addTo(g);
+        arrows(ll, r.color);
+      }
+      if (d.editIdx===i) ll.forEach(function(x){ mk(x, L.divIcon({ className:'rvtx-wrap', iconSize:[0,0], html:'<div class="rvtx"></div>' })); });
+      if (ll.length){
+        var m = mk(ll[0], L.divIcon({ className:'rnum-wrap', iconSize:[24,24], iconAnchor:[12,12], html:'<div class="rnum" style="background:'+r.color+'">'+(i+1)+'</div>' }));
+        if (r.label) m.bindTooltip(esc(r.label), { permanent:true, direction:'right', offset:[12,0], className:'rtip' });
+      }
+    });
+    if (d.pile) mk(d.pile, L.divIcon({ className:'rpile-wrap', iconSize:[0,0], html:'<div class="rpile">\u2744 Snow pile</div>' }));
+  }
+  function bounds(d){
+    var b = L.latLngBounds([]);
+    (d.routes||[]).forEach(function(r){ r.pts.forEach(function(p){ b.extend(p); }); });
+    if (d.pile) b.extend(d.pile);
+    if (d.lot) d.lot.forEach(function(p){ b.extend(p); });
+    return b;
+  }
+  map.on('zoomend', function(){ if (last) render(last); });
+  return { render:render, bounds:bounds };
+}
+
 var Q = Object.assign({}, QDEF, load('quote', {}));
+Q.routes = normRoutes(Q.routes); Q.pile = normPile(Q.pile); Q.lotPts = normLot(Q.lotPts);
 function saveQ(){ save('quote', Q); }
 
 /* ---------- seasonal ---------- */
@@ -694,7 +836,7 @@ function route(){
   if (s==='dispatch') renderBoard();
   if (s==='users') renderUsers();
   if (s==='seasonal') renderSeasonal();
-  if (s==='quote') renderQuote();
+  if (s==='quote'){ renderQuote(); QR.show(); }
 }
 function go(s){ if (location.hash === '#'+s) route(); else location.hash = s; }
 window.addEventListener('hashchange', route);
@@ -788,28 +930,187 @@ function quoteSummary(){
   L.push('Total: ' + usd(p.total));
   L.push('From: ' + S.yardName + ', ' + S.yardAddr);
   if (Q.notes) L.push('Notes: ' + Q.notes);
+  if (Q.routes.length || Q.pile){ L.push('Plow routes:'); routeLines(Q.routes, Q.pile).forEach(function(x){ L.push(x); }); }
   return L.join('\n');
 }
 $('qCopy').onclick = function(){ copyText(quoteSummary(), 'Quote summary copied'); };
 $('qMeasure').onclick = function(){ go('measure'); };
 $('qNew').onclick = function(){
   if ((Q.cust||Q.addr||Q.notes) && !confirm('Clear the current quote?')) return;
-  Q = clone(QDEF); saveQ(); renderQuote(); $('qCust').focus();
+  QR.stop(); Q = clone(QDEF); saveQ(); renderQuote(); QR.reset(); $('qCust').focus();
 };
 $('qAdd').onclick = function(){
+  QR.stop();
   if (!String(Q.cust).trim() && !String(Q.addr).trim()){ toast('Enter a customer or site address first'); $('qCust').focus(); return; }
   if (!(price(Q).hours>0)){ toast('Enter push, salting, or sidewalk hours first'); $('qHours').focus(); return; }
   var j = { id:nextId(), cust:String(Q.cust).trim(), addr:String(Q.addr).trim(), cls:Q.cls, status:'Queued', crew:String(Q.crew||'Unassigned').trim()||'Unassigned',
     pri:!!Q.pri, aft:!!Q.aft, salt:!!Q.salt, walk:!!Q.walk, saltHrs:Q.salt?num(Q.saltHrs,S.saltHrs):0, walkHrs:Q.walk?num(Q.walkHrs,S.walkHrs):0,
-    travel:!!Q.travel, min:num(Q.min), hours:num(Q.hours), sqft:num(Q.sqft), notes:String(Q.notes||'').trim(), created:Date.now() };
+    travel:!!Q.travel, min:num(Q.min), hours:num(Q.hours), sqft:num(Q.sqft), notes:String(Q.notes||'').trim(), created:Date.now(),
+    routes:clone(normRoutes(Q.routes)), pile:normPile(Q.pile), lotPts:normLot(Q.lotPts) };
   J.push(j); saveJ(); renderTop();
   toast(j.id + ' added to dispatch — ' + usd(price(j).total));
   go('dispatch');
 };
 
+/* ---------- QUOTE: plow route editor ---------- */
+var QR = (function(){
+  var map=null, RL=null, mode='view', cur=-1, needFit=true, inited=false, failed=false;
+  function st(t){ $('rStatus').textContent = t||''; }
+  function data(){ return { routes:Q.routes, pile:Q.pile, lot:Q.lotPts, editIdx: mode==='draw' ? cur : -1 }; }
+  function help(){
+    var h;
+    if (failed) h = 'Map unavailable offline.';
+    else if (mode==='draw'){ var n = (Q.routes[cur]||{pts:[]}).pts.length; h = '<b>Route ' + (cur+1) + ': tap the map along the push path, start to finish.</b> ' + (n<2 ? 'Add at least 2 points.' : 'Double-click or tap “Finish route” when done.'); }
+    else if (mode==='pile') h = '<b>Tap the map where the snow pile goes.</b>';
+    else if (!Q.routes.length) h = '<b>Tap “New route”, then tap the map along the path the pusher should push.</b> Arrows point the way.';
+    else h = 'Routes save with this quote. Tap “New route” for another, or edit notes and colors below.';
+    $('rHelp').innerHTML = h;
+  }
+  function buttons(){
+    var drawing = mode==='draw', r = Q.routes[cur];
+    $('rNew').disabled = failed || drawing;
+    $('rUndo').disabled = !drawing || !r || !r.pts.length;
+    $('rFinish').disabled = !drawing;
+    $('rFinish').classList.toggle('pri', drawing);
+    $('rPile').disabled = failed;
+    $('rPile').classList.toggle('on', mode==='pile');
+    $('rPile').textContent = mode==='pile' ? 'Tap map for pile…' : (Q.pile ? 'Move snow pile' : 'Mark snow pile');
+    $('rPileDel').style.display = Q.pile ? '' : 'none';
+    $('rClear').disabled = !Q.routes.length && !Q.pile;
+    $('rFit').disabled = failed;
+  }
+  function draw(){ if (RL) RL.render(data()); buttons(); help(); }
+  function renderList(){
+    var list = $('rList'); list.innerHTML = '';
+    if (!Q.routes.length){ list.innerHTML = '<div class="empty">No plow routes on this quote yet.</div>'; return; }
+    Q.routes.forEach(function(r, i){
+      var el = document.createElement('div');
+      el.className = 'rrow' + (mode==='draw' && cur===i ? ' editing' : '');
+      el.style.borderLeftColor = r.color;
+      var ft = routeLenFt(r);
+      el.innerHTML =
+        '<div class="rhead"><span class="rnum" style="background:'+r.color+'">'+(i+1)+'</span><b>Route '+(i+1)+'</b>'+
+          '<span class="hint">'+r.pts.length+' point'+(r.pts.length===1?'':'s')+(ft>0?' · ~'+fmt(ft)+' ft':'')+(mode==='draw'&&cur===i?' · drawing':'')+'</span></div>'+
+        '<label class="sr" for="rl-'+i+'">Route '+(i+1)+' note</label>'+
+        '<input type="text" id="rl-'+i+'" class="rlabel" maxlength="200" placeholder="Note for the pusher, e.g. push north to pile in NE corner" autocomplete="off">'+
+        '<div class="rcolors" role="group" aria-label="Route '+(i+1)+' color">'+
+          ROUTE_COLORS.map(function(c){ return '<button type="button" class="rsw" data-c="'+c+'" style="background:'+c+'" aria-label="'+ROUTE_CNAMES[c]+'" aria-pressed="'+(c===r.color?'true':'false')+'"></button>'; }).join('')+
+        '</div>'+
+        '<div class="btnrow">'+
+          '<button type="button" class="btn sm" data-a="ext"'+(mode==='draw'?' disabled':'')+'>Add points</button>'+
+          '<button type="button" class="btn sm" data-a="rev">Reverse direction</button>'+
+          '<button type="button" class="btn sm bad" data-a="del">Delete route</button>'+
+        '</div>';
+      var inp = el.querySelector('.rlabel'); inp.value = r.label || '';
+      inp.addEventListener('input', function(){ r.label = inp.value; saveQ(); draw(); });
+      Array.prototype.forEach.call(el.querySelectorAll('.rsw'), function(b){
+        b.onclick = function(){ r.color = b.getAttribute('data-c'); saveQ(); renderList(); draw(); };
+      });
+      el.querySelector('[data-a=ext]').onclick = function(){ if (!map) return; mode='draw'; cur=i; map.doubleClickZoom.disable(); st(''); renderList(); draw(); };
+      el.querySelector('[data-a=rev]').onclick = function(){ r.pts.reverse(); saveQ(); renderList(); draw(); toast('Route '+(i+1)+' reversed'); };
+      el.querySelector('[data-a=del]').onclick = function(){
+        if (r.pts.length>=2 && !confirm('Delete route '+(i+1)+(r.label?' ('+r.label+')':'')+'?')) return;
+        if (mode==='draw'){ if (cur===i){ mode='view'; cur=-1; if (map) map.doubleClickZoom.enable(); } else if (cur>i) cur--; }
+        Q.routes.splice(i,1); saveQ(); renderList(); draw(); toast('Route deleted');
+      };
+      list.appendChild(el);
+    });
+  }
+  function startRoute(){
+    if (!map) return;
+    stop(true);
+    var c = ROUTE_COLORS[Q.routes.length % ROUTE_COLORS.length];
+    Q.routes.push({ color:c, label:'', pts:[] });
+    cur = Q.routes.length-1; mode = 'draw'; map.doubleClickZoom.disable(); st('');
+    saveQ(); renderList(); draw();
+  }
+  function stop(quiet){
+    if (mode==='draw'){
+      var r = Q.routes[cur];
+      if (r && r.pts.length<2){ Q.routes.splice(cur,1); if (!quiet && r.pts.length) toast('A route needs at least 2 points — removed'); }
+      else if (r && !quiet) toast('Route '+(cur+1)+' saved');
+    }
+    mode = 'view'; cur = -1;
+    if (map) map.doubleClickZoom.enable();
+    saveQ(); renderList(); draw();
+  }
+  function dedupeTail(){
+    var r = Q.routes[cur]; if (!r || !map) return;
+    while (r.pts.length>=2){
+      var a = map.latLngToContainerPoint(r.pts[r.pts.length-1]), b = map.latLngToContainerPoint(r.pts[r.pts.length-2]);
+      if (a.distanceTo(b) < 10) r.pts.pop(); else break;
+    }
+  }
+  function fit(){
+    if (!map) return;
+    var b = RL.bounds(data());
+    if (b.isValid()){
+      if (b.getNorthEast().equals(b.getSouthWest())) map.setView(b.getCenter(), 19);
+      else map.fitBounds(b, { paddingTopLeft:[40,60], paddingBottomRight:[60,40], maxZoom:20 });
+      return;
+    }
+    var mv = load('measure', {}).view;
+    if (Array.isArray(mv) && llOk(mv)) map.setView([mv[0], mv[1]], mv[2] || 19);
+  }
+  function init(){
+    if (inited) return; inited = true;
+    if (typeof L === 'undefined'){ failed = true; $('rmapfail').style.display='flex'; renderList(); draw(); return; }
+    map = L.map('rmap', { zoomControl:true, tap:false }).setView([37.79264, -97.33600], 18);
+    addBaseLayers(map);
+    RL = RouteLayer(map);
+    map.on('click', function(e){
+      var p = [Math.round(e.latlng.lat*1e7)/1e7, Math.round(e.latlng.lng*1e7)/1e7];
+      if (mode==='draw'){
+        var r = Q.routes[cur]; if (!r){ mode='view'; draw(); return; }
+        r.pts.push(p); saveQ(); renderList(); draw();
+      } else if (mode==='pile'){
+        Q.pile = p; mode = 'view'; saveQ(); draw(); toast('Snow pile marked');
+      } else {
+        st('Tap “New route” to draw a plow route.'); setTimeout(function(){ st(''); }, 2200);
+      }
+    });
+    map.on('dblclick', function(){ if (mode==='draw'){ dedupeTail(); stop(false); } });
+  }
+  $('rNew').onclick = startRoute;
+  $('rFinish').onclick = function(){ stop(false); };
+  $('rUndo').onclick = function(){ var r = Q.routes[cur]; if (mode!=='draw' || !r) return; r.pts.pop(); saveQ(); renderList(); draw(); };
+  $('rPile').onclick = function(){ if (!map) return; if (mode==='pile'){ mode='view'; draw(); return; } stop(true); mode='pile'; draw(); };
+  $('rPileDel').onclick = function(){ Q.pile = null; if (mode==='pile') mode='view'; saveQ(); draw(); toast('Snow pile removed'); };
+  $('rFit').onclick = fit;
+  $('rClear').onclick = function(){
+    if ((Q.routes.length || Q.pile) && !confirm('Clear all plow routes and the snow pile on this quote?')) return;
+    mode='view'; cur=-1; if (map) map.doubleClickZoom.enable();
+    Q.routes = []; Q.pile = null; saveQ(); renderList(); draw(); toast('Routes cleared');
+  };
+  return {
+    show: function(){
+      init(); renderList(); draw();
+      if (map) setTimeout(function(){ map.invalidateSize(); if (needFit){ needFit = false; fit(); } }, 40);
+    },
+    stop: function(){ if (mode!=='view') stop(true); },
+    reset: function(){ mode='view'; cur=-1; needFit = true; if (map) map.doubleClickZoom.enable(); renderList(); draw(); if (map && $('scr-quote').classList.contains('on')){ needFit=false; fit(); } },
+    lotChanged: function(){ needFit = true; }
+  };
+})();
+
 /* ---------- DISPATCH ---------- */
 var DF = Object.assign({ status:'All', crew:'All crews', q:'' }, load('dfilter', {}));
+var BOARD_MAPS = [], OPEN_RT = {};
+function jobRouteData(j){ return { routes:normRoutes(j.routes), pile:normPile(j.pile), lot:normLot(j.lotPts), editIdx:-1 }; }
+function openJobMap(el, j){
+  var box = el.querySelector('.jmap'); if (!box || typeof L==='undefined') return;
+  var d = jobRouteData(j);
+  var m = L.map(box, { zoomControl:true, tap:false, scrollWheelZoom:false, dragging:!L.Browser.mobile }).setView([37.79264, -97.33600], 18);
+  addBaseLayers(m);
+  var rl = RouteLayer(m);
+  var b = rl.bounds(d);
+  if (b.isValid()){ if (b.getNorthEast().equals(b.getSouthWest())) m.setView(b.getCenter(), 19); else m.fitBounds(b, { paddingTopLeft:[30,56], paddingBottomRight:[56,30], maxZoom:20 }); }
+  rl.render(d);
+  BOARD_MAPS.push(m);
+  setTimeout(function(){ m.invalidateSize(); if (b.isValid() && !b.getNorthEast().equals(b.getSouthWest())) m.fitBounds(b, { paddingTopLeft:[30,56], paddingBottomRight:[56,30], maxZoom:20 }); }, 60);
+}
 function renderBoard(){
+  BOARD_MAPS.forEach(function(m){ try{ m.remove(); }catch(e){} }); BOARD_MAPS = [];
   var chips = $('stChips'); chips.innerHTML='';
   ['All'].concat(STATUSES).forEach(function(s){
     var n = s==='All' ? J.length : J.filter(function(j){return j.status===s;}).length;
@@ -844,6 +1145,10 @@ function renderBoard(){
     list.forEach(function(j){ wrap.appendChild(jobCard(j)); });
     col.appendChild(wrap); board.appendChild(col);
   });
+  Array.prototype.forEach.call(board.querySelectorAll('.job[data-rt-open="1"]'), function(el){
+    var j = null; for (var i=0;i<J.length;i++) if (J[i].id===el.dataset.id){ j = J[i]; break; }
+    if (j) openJobMap(el, j);
+  });
   renderTop();
 }
 function jobCard(j){
@@ -856,6 +1161,17 @@ function jobCard(j){
   if (j.salt) tags += '<span class="tag">Salting</span>';
   if (j.walk) tags += '<span class="tag">Sidewalks</span>';
   if (j.travel && p.travelHours>0) tags += '<span class="tag t">Travel '+fmt(p.travelHours,2)+' hr</span>';
+  var rts = normRoutes(j.routes), rpile = normPile(j.pile), hasRt = rts.length>0 || !!rpile;
+  if (rts.length) tags += '<span class="tag r">'+rts.length+' plow route'+(rts.length===1?'':'s')+'</span>';
+  el.dataset.id = j.id;
+  var rtOpen = hasRt && !!OPEN_RT[j.id];
+  if (rtOpen) el.dataset.rtOpen = '1';
+  var rtHtml = !hasRt ? '' : '<div class="jroutes">'+
+    rts.map(function(r,i){ return '<div class="jr"><span class="rnum" style="background:'+r.color+'">'+(i+1)+'</span><span>'+(r.label?esc(r.label):'<span class="hint">Route '+(i+1)+' (no note)</span>')+'</span></div>'; }).join('')+
+    (rpile ? '<div class="jr mut"><span>\u2744</span><span>Snow pile marked on map</span></div>' : '')+
+    '<button type="button" class="btn sm" data-a="rmap" aria-expanded="'+(rtOpen?'true':'false')+'">'+(rtOpen?'Hide route map':'Show route map')+'</button>'+
+    (rtOpen ? '<div class="jmap" aria-label="Plow route map for '+esc(j.id)+'"></div>' : '')+
+  '</div>';
   el.innerHTML =
     '<div class="top"><span class="id">'+esc(j.id)+'</span><span class="amt">'+usd(p.total)+'</span></div>'+
     '<div class="nm">'+esc(j.cust||j.addr)+'</div><div class="ad">'+esc(j.cust?j.addr:'')+'</div>'+
@@ -864,15 +1180,32 @@ function jobCard(j){
     '<label class="sr" for="hr-'+esc(j.id)+'">Hours</label><input id="hr-'+esc(j.id)+'" type="number" min="0" step="0.25" inputmode="decimal" data-k="hours" value="'+esc(j.hours)+'" title="Billable hours"></div>'+
     '<div class="crew"><label class="sr" for="cr-'+esc(j.id)+'">Crew</label><input id="cr-'+esc(j.id)+'" type="text" list="crewList" data-k="crew" value="'+esc(j.crew)+'" title="Crew / truck"></div>'+
     (j.notes ? '<div class="notes">'+esc(j.notes)+'</div>' : '')+
+    rtHtml+
     '<div class="acts">'+(next?'<button type="button" class="btn sm pri" data-a="next">Mark '+esc(next.toLowerCase())+'</button>':'')+
     '<button type="button" class="btn sm" data-a="copy">Copy</button><button type="button" class="btn sm bad" data-a="del" aria-label="Delete '+esc(j.id)+'">Delete</button></div>';
   el.querySelector('[data-k=status]').onchange = function(e){ j.status=e.target.value; saveJ(); renderBoard(); };
   el.querySelector('[data-k=hours]').onchange = function(e){ j.hours=Math.max(0,num(e.target.value)); saveJ(); renderBoard(); };
   el.querySelector('[data-k=crew]').onchange = function(e){ j.crew=e.target.value.trim()||'Unassigned'; saveJ(); renderBoard(); };
+  var rb = el.querySelector('[data-a=rmap]');
+  if (rb) rb.onclick = function(){
+    OPEN_RT[j.id] = !OPEN_RT[j.id];
+    var jr = el.querySelector('.jroutes'), box = el.querySelector('.jmap');
+    if (OPEN_RT[j.id]){
+      el.dataset.rtOpen = '1';
+      box = document.createElement('div'); box.className = 'jmap'; box.setAttribute('aria-label','Plow route map for '+j.id); jr.appendChild(box);
+      rb.textContent = 'Hide route map'; rb.setAttribute('aria-expanded','true');
+      openJobMap(el, j);
+    } else {
+      delete el.dataset.rtOpen;
+      BOARD_MAPS = BOARD_MAPS.filter(function(m){ if (m.getContainer()===box){ try{ m.remove(); }catch(e){} return false; } return true; });
+      if (box) box.remove();
+      rb.textContent = 'Show route map'; rb.setAttribute('aria-expanded','false');
+    }
+  };
   var nb = el.querySelector('[data-a=next]'); if (nb) nb.onclick = function(){ j.status=next; saveJ(); renderBoard(); toast(j.id+' → '+next); };
   el.querySelector('[data-a=copy]').onclick = function(){
     var pp = price(j);
-    copyText([j.id+' · '+j.status, j.cust, j.addr, fmt(pp.hours,2)+' hr'+(j.pri?' · priority':'')+(j.aft?' · after-hours':'')+(j.salt?' · salting':'')+(j.walk?' · sidewalks':''), 'Crew: '+j.crew, 'Est: '+usd(pp.total)].filter(Boolean).join('\n'), j.id+' copied');
+    copyText([j.id+' · '+j.status, j.cust, j.addr, fmt(pp.hours,2)+' hr'+(j.pri?' · priority':'')+(j.aft?' · after-hours':'')+(j.salt?' · salting':'')+(j.walk?' · sidewalks':''), 'Crew: '+j.crew, 'Est: '+usd(pp.total)].concat((rts.length||rpile) ? ['Plow routes:'].concat(routeLines(rts, rpile)) : []).filter(Boolean).join('\n'), j.id+' copied');
   };
   el.querySelector('[data-a=del]').onclick = function(){ if (!confirm('Delete '+j.id+' ('+(j.cust||j.addr)+')?')) return; J = J.filter(function(x){return x!==j;}); saveJ(); renderBoard(); toast(j.id+' deleted'); };
   return el;
@@ -1217,6 +1550,7 @@ var Measure = (function(){
     Q.sqftSrc = 'From map: ' + fmt(res.lot) + ' lot − ' + fmt(res.removed) + ' buildings' + (B.state==='ok' ? '' : ' (buildings not loaded)');
     Q.hours = Math.round(suggestedHours(res.net)*100)/100;
     Q.cls = suggestLot(res.net);
+    Q.lotPts = pts.map(function(p){ return [p.lat, p.lng]; }); QR.lotChanged();
     if (!String(Q.addr).trim() && MS.lastAddr) Q.addr = MS.lastAddr;
     saveQ(); go('quote');
     toast(B.state==='ok' ? ('Net ' + fmt(res.net) + ' sq ft → ' + fmt(Q.hours,2) + ' hr') : 'Buildings not loaded — full lot area used');

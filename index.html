@@ -11,9 +11,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0d1620">
 <meta name="description" content="ICT Snow Removal — lot measuring, hourly quotes, dispatch board and seasonal pricing.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d1620'/%3E%3Cpath d='M12 42h40v6H12zM18 34h28l6 8H12z' fill='%237fd3ff'/%3E%3Cpath d='M22 20h14l6 14H22z' fill='%23e6f1f8'/%3E%3C/svg%3E">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230d1620'/%3E%3Cpath d='M12 42h40v6H12zM18 34h28l6 8H12z' fill='%237fd3ff'/%3E%3Cpath d='M22 20h14l6 14H22z' fill='%23e6f1f8'/%3E%3C/svg%3E">
-<link rel="manifest" id="manifestLink">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -51,6 +53,7 @@
   --ice:#7fd3ff;--ice-d:#3fa9e0;--txt:#e6f1f8;--mut:#93a8b8;--warn:#ffb86b;--bad:#ff7a7a;--ok:#6fe0a6;
   --bldg:#ff9f43;--r:10px;--tap:44px;
   --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-t:env(safe-area-inset-top,0px);--safe-l:env(safe-area-inset-left,0px);--safe-r:env(safe-area-inset-right,0px);
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
@@ -61,7 +64,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* top bar */
 .topbar{display:flex;align-items:center;gap:14px;padding:0 14px;height:56px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto}
 .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:17px;letter-spacing:.2px;white-space:nowrap}
-.brand svg{width:28px;height:28px}
+.brand{gap:10px}
+.brand-logo{height:42px;width:auto;display:block;flex:0 0 auto}
+.brand-sub{font-weight:700;font-size:16px;color:var(--txt);padding-left:10px;border-left:1px solid var(--line2);line-height:1.1}
 .nav{display:flex;gap:4px;margin-left:8px}
 .nav a{display:flex;align-items:center;gap:7px;min-height:40px;padding:0 13px;border-radius:8px;color:var(--mut);text-decoration:none;font-weight:600;font-size:14px}
 .nav a svg{width:18px;height:18px;flex:0 0 auto}
@@ -272,6 +277,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
 .tag.r{background:#3a3214;color:#ffe08a}
 @media (max-width:760px){#rmapwrap{height:340px}.rtools .btn{flex:1 1 calc(50% - 8px)}}
 @media print{.topbar,.nav,.btnrow{display:none}}
+
+/* installable app (PWA) */
+.topbar{padding-top:var(--safe-t);padding-left:calc(14px + var(--safe-l));padding-right:calc(14px + var(--safe-r));height:calc(56px + var(--safe-t))}
+#installBtn{min-height:36px;padding:0 12px;font-size:13.5px;background:var(--ice);color:#06202e;border-color:var(--ice)}
+#installBtn svg{width:16px;height:16px}
+#installBtn[hidden],#iosHint[hidden]{display:none}
+#iosHint{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + var(--safe-b));z-index:2500;display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line2);color:var(--txt);padding:10px 8px 10px 14px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.45);font-size:14px;max-width:calc(100vw - 24px);width:max-content}
+#iosHint svg{width:20px;height:20px;flex:0 0 auto;color:var(--ice)}
+#iosHint button{background:none;border:0;color:var(--mut);min-width:var(--tap);min-height:var(--tap);font-size:20px;cursor:pointer}
+@media (display-mode:standalone){#installBtn,#iosHint{display:none!important}}
+@media (max-width:760px){
+  .topbar{height:calc(50px + var(--safe-t))}
+  .brand-logo{height:36px}
+  .brand{gap:8px}
+  .brand-sub{font-size:14px;padding-left:8px}
+  #iosHint{bottom:calc(76px + var(--safe-b))}
+  #installBtn span{display:none}
+  #installBtn{padding:0 10px}
+}
 </style>
 </head>
 <body>
@@ -286,8 +310,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
 <div id="shell">
   <header class="topbar">
     <div class="brand">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#1a2836"/><path d="M12 42h40v6H12zM18 34h28l6 8H12z" fill="#7fd3ff"/><path d="M22 20h14l6 14H22z" fill="#e6f1f8"/></svg>
-      ICT Snow Removal
+      <img class="brand-logo" src="./icons/logo-on-dark.png" width="517" height="249" alt="ICT">
+      <span class="brand-sub">Snow Removal</span>
     </div>
     <nav class="nav" aria-label="Screens">
       <a href="#measure" data-s="measure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 7l6-3 8 3v13l-8-3-6 3z"/><path d="M10 4v13"/></svg><span>Measure</span></a>
@@ -298,7 +322,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
       <a href="#settings" data-s="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>Settings</span></a>
     </nav>
     <div class="topmeta"><b id="tmRate">$350/hr</b><br><span id="tmJobs">0 open jobs</span></div>
+    <button type="button" class="btn" id="installBtn" hidden aria-label="Install app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>Install app</span></button>
   </header>
+<div id="iosHint" role="status" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4"/><path d="M5 11v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/></svg>
+  <span>Install: tap <b>Share</b>, then <b>Add to Home Screen</b></span>
+  <button type="button" id="iosHintX" aria-label="Dismiss">&times;</button>
+</div>
 
   <main id="main">
     <!-- MEASURE -->
@@ -1564,11 +1594,35 @@ var Measure = (function(){
 })();
 window.SnowPush = { price:price, seasonalMonthly:seasonalMonthly, travelHours:travelHours, Measure:Measure };
 
-/* manifest for add-to-home-screen */
-try{
-  var icon = document.querySelector('link[rel=icon]').href;
-  $('manifestLink').href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify({ name:'ICT Snow Removal', short_name:'ICT Snow', display:'standalone', background_color:'#0d1620', theme_color:'#0d1620', start_url:'.', icons:[{ src:icon, sizes:'any', type:'image/svg+xml' }] }));
-}catch(e){}
+/* installable app: service worker, install button, iOS hint */
+(function(){
+  var isStandalone = function(){ return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; };
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('./sw.js', { scope:'./' }).then(function(reg){
+        if (reg.update) setInterval(function(){ reg.update().catch(function(){}); }, 60*60*1000);
+      }).catch(function(err){ console.warn('Service worker not registered', err); });
+    });
+  }
+  var btn = $('installBtn'), hint = $('iosHint'), deferred = null;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault(); deferred = e;
+    if (!isStandalone()) btn.hidden = false;
+  });
+  btn.addEventListener('click', function(){
+    if (!deferred) return;
+    btn.hidden = true;
+    deferred.prompt();
+    deferred.userChoice.then(function(c){ if (c && c.outcome === 'accepted') toast('Installing ICT Snow Removal'); deferred = null; }).catch(function(){ deferred = null; });
+  });
+  window.addEventListener('appinstalled', function(){ btn.hidden = true; deferred = null; });
+  var ua = navigator.userAgent || '';
+  var isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var hintKey = KEY + 'ios-install-hint-dismissed';
+  var dismissed = false; try { dismissed = localStorage.getItem(hintKey) === '1'; } catch(e){}
+  if (isIOS && !isStandalone() && !dismissed) hint.hidden = false;
+  $('iosHintX').addEventListener('click', function(){ hint.hidden = true; try { localStorage.setItem(hintKey, '1'); } catch(e){} });
+})();
 
 fillSettings(); renderQuote(); renderTop(); route();
 })();

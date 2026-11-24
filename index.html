@@ -1366,8 +1366,12 @@ var Measure = (function(){
     var my = ++B.req;
     B.state = 'loading'; B.err=''; B.pending = qb; B.src = { fema:'loading', osm:'loading' }; B.parts = { fema:[], osm:[] }; B.list = [];
     compute();
-    function settle(){
+    // Ignore a source that answers after the lot was cleared or moved: writing B.* first
+    // would clobber the newer request, and settle()'s own generation check would then no-op.
+    function settle(src, err, list){
       if (my!==B.req) return;
+      if (err){ B.src[src] = 'error'; B.src[src+'Err'] = (src==='fema' ? 'FEMA ' : 'OSM ') + errMsg(err); }
+      else { B.parts[src] = list || []; B.src[src] = 'ok'; }
       var ok = B.src.fema==='ok' || B.src.osm==='ok', busy = B.src.fema==='loading' || B.src.osm==='loading';
       B.list = B.parts.osm.concat(B.parts.fema);
       if (ok){ B.state = busy ? 'part' : 'ok'; B.box = qb; }
@@ -1375,10 +1379,8 @@ var Measure = (function(){
       if (!busy) B.pending = null;
       compute();
     }
-    fetchFema(qb).then(function(l){ B.parts.fema = l; B.src.fema = 'ok'; settle(); })
-      .catch(function(e){ B.src.fema = 'error'; B.src.femaErr = 'FEMA ' + errMsg(e); settle(); });
-    fetchOsm(qb).then(function(l){ B.parts.osm = l; B.src.osm = 'ok'; settle(); })
-      .catch(function(e){ B.src.osm = 'error'; B.src.osmErr = 'OSM ' + errMsg(e); settle(); });
+    fetchFema(qb).then(function(l){ settle('fema', null, l); }, function(e){ settle('fema', e); });
+    fetchOsm(qb).then(function(l){ settle('osm', null, l); }, function(e){ settle('osm', e); });
   }
   // FEMA / Oak Ridge "USA Structures": every US building over ~450 sq ft, traced from imagery. Answers in well under a second.
   function fetchFema(qb){
@@ -1423,7 +1425,13 @@ var Measure = (function(){
       var left = ENDPOINTS.length, won = false;
       ENDPOINTS.forEach(function(url){
         fetchT_(url, { method:'POST', body:'data='+encodeURIComponent(query), headers:{'Content-Type':'application/x-www-form-urlencoded'} }, 15000)
-          .then(function(j){ if (!j || !Array.isArray(j.elements)) throw new Error('bad response'); if (!won){ won = true; resolve(parseOverpass(j)); } })
+          .then(function(j){
+            if (won) return;
+            if (!j || !Array.isArray(j.elements)) throw new Error('bad response');
+            var parsed = parseOverpass(j);
+            if (won) return;
+            won = true; resolve(parsed);
+          })
           .catch(function(){ if (--left === 0 && !won) reject(new Error('Overpass busy')); });
       });
     }).catch(function(){

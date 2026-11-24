@@ -135,7 +135,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
 .mhelp .bk{color:var(--bldg)}
 #mapwrap{flex:1 1 auto;position:relative;min-height:300px}
 #map{position:absolute;inset:0;background:#1b2733}
-#map.mode-building .lot-path{pointer-events:none}
+#map.mode-building .lot-path,#map.mode-building .bldg-path{pointer-events:none}
+#map.mode-building .leaflet-container,#map.mode-building{cursor:crosshair}
+.bldg-path.man{stroke-dasharray:none}
+#mBldgBar{display:none}
+#mBldgBar.on{display:flex}
 .leaflet-container{cursor:crosshair;font:inherit}
 .leaflet-container.dragging-shape{cursor:grabbing}
 .lot-path,.bldg-path{cursor:grab}
@@ -345,12 +349,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--ice);outline:none}
           <button class="btn sm" id="mCloseShape" type="button">Close shape</button>
           <button class="btn sm bad" id="mClear" type="button">Clear lot</button>
           <span class="sep"></span>
+          <button class="btn sm bmode" id="mBldg" type="button">Draw building</button>
           <button class="btn sm" id="mRetry" type="button">Reload buildings</button>
           <button class="btn sm" id="mRestore" type="button" disabled>Restore ignored</button>
           <span class="sep"></span>
           <button class="btn sm" id="mYard" type="button">Yard</button>
           <button class="btn sm" id="mFit" type="button">Fit lot</button>
           <button class="btn sm pri" id="mUse" type="button">Use on quote</button>
+        </div>
+        <div class="mrow" id="mBldgBar" role="toolbar" aria-label="Draw building tools">
+          <button class="btn sm pri" id="mBldgDone" type="button">Finish building</button>
+          <button class="btn sm" id="mBldgUndo" type="button">Undo building corner</button>
+          <button class="btn sm" id="mBldgX" type="button">Cancel</button>
         </div>
         <p class="mhelp" id="mhelp"></p>
       </div>
@@ -1297,10 +1307,12 @@ $('cfExport').onclick = function(){
 /* ---------- MEASURE (Leaflet + auto building subtraction via OSM Overpass) ---------- */
 var Measure = (function(){
   var YARD_LL = [37.79264, -97.33600];
-  var MS = Object.assign({ pts:[], closed:false, ignored:[], view:null, lastAddr:'' }, load('measure', {}));
+  var MS = Object.assign({ pts:[], closed:false, ignored:[], manual:[], view:null, lastAddr:'' }, load('measure', {}));
+  if (!Array.isArray(MS.manual)) MS.manual = [];
   var map=null, poly, line, markers=[], pts=[], closed=false, bLayer, inited=false;
-  var B = { state:'idle', list:[], box:null, err:'', req:0 };
-  var res = { lot:0, removed:0, net:0, count:0 };
+  var B = { state:'idle', list:[], box:null, err:'', req:0, src:{}, parts:{} };
+  var drawMode = false, dpts = [], dmarkers = [], dline = null;
+  var res = { lot:0, removed:0, net:0, count:0, by:{} };
   var fetchT = null;
   var pc = window.polygonClipping;
   var K = 6378137 * Math.PI / 180;
@@ -1318,9 +1330,10 @@ var Measure = (function(){
   function st(t){ $('mstatus').textContent = t||''; }
   function help(){
     var h;
-    if (!pts.length) h = '<b>Click the map to drop corners around the paved lot.</b> Switch to Satellite (top right) to see pavement. Buildings inside the lot are found and removed automatically.';
+    if (!pts.length) h = '<b>Click the map to drop corners around the paved lot.</b> Switch to Satellite (top right) to see pavement. Buildings inside the lot are found and removed automatically (FEMA + OpenStreetMap), or trace one yourself with “Draw building”.';
     else if (!closed) h = '<b>Keep clicking corners.</b> Close the shape by clicking the yellow first corner or “Close shape”. Right-click / long-press a corner to delete it.';
-    else h = '<b>Drag the shaded lot to move it, drag corners to reshape.</b> <span class="bk">Hatched orange</span> = buildings removed from OSM. Tap a building to ignore it if it’s wrong.';
+    else if (drawMode) h = '<b>Tap each corner of the building.</b> Tap its first corner or “Finish building” to cut it out of the lot.';
+    else h = '<b>Drag the shaded lot to move it, drag corners to reshape.</b> <span class="bk">Hatched orange</span> = buildings removed. Tap a building to ignore it if it’s wrong. Missing one? Tap “Draw building” and trace it.';
     $('mhelp').innerHTML = h;
   }
   function saveM(){
@@ -1329,41 +1342,109 @@ var Measure = (function(){
     save('measure', MS);
   }
 
-  /* building fetch (Overpass) */
-  var ENDPOINTS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+  /* building fetch: FEMA USA Structures (fast, nationwide) + OpenStreetMap (Overpass, then the OSM API) */
+  var ENDPOINTS = ['https://overpass-api.de/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter','https://overpass.private.coffee/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  var FEMA_URL = 'https://services2.arcgis.com/FiaPA4ga0iQKduv3/ArcGIS/rest/services/USA_Structures_View/FeatureServer/0/query';
+  var OSM_API = 'https://api.openstreetmap.org/api/0.6/map.json';
   function lotBox(){ var s=90,w=180,n=-90,e=-180; pts.forEach(function(p){ s=Math.min(s,p.lat); n=Math.max(n,p.lat); w=Math.min(w,p.lng); e=Math.max(e,p.lng); }); return {s:s,w:w,n:n,e:e}; }
   function inside(a, b){ return b && a.s>=b.s && a.n<=b.n && a.w>=b.w && a.e<=b.e; }
   function scheduleBuildings(force, delay){ clearTimeout(fetchT); fetchT = setTimeout(function(){ ensureBuildings(force); }, delay==null?600:delay); }
+  function fetchT_(url, opts, ms){
+    var ctl = window.AbortController ? new AbortController() : null, to = null;
+    if (ctl){ opts = Object.assign({}, opts||{}, { signal: ctl.signal }); to = setTimeout(function(){ ctl.abort(); }, ms); }
+    return fetch(url, opts).then(function(r){ clearTimeout(to); if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); },
+      function(e){ clearTimeout(to); throw (e && e.name==='AbortError') ? new Error('timed out') : e; });
+  }
+  function errMsg(e){ return (e && e.message) || 'network error'; }
   function ensureBuildings(force){
     if (!closed || pts.length<3) return;
     var box = lotBox();
-    if (!force && B.state==='ok' && inside(box, B.box)){ compute(); return; }
+    if (!force && (B.state==='ok' || B.state==='part') && inside(box, B.box)){ compute(); return; }
     if (!force && B.state==='loading' && inside(box, B.pending)){ compute(); return; }
     var padLat = 0.001, padLng = 0.001/Math.max(0.2,Math.cos(box.s*Math.PI/180));
     var qb = { s:box.s-padLat, w:box.w-padLng, n:box.n+padLat, e:box.e+padLng };
-    var bb = [qb.s,qb.w,qb.n,qb.e].map(function(v){return v.toFixed(6);}).join(',');
-    var query = '[out:json][timeout:25];(way["building"]('+bb+');relation["building"]('+bb+'););out geom;';
     var my = ++B.req;
-    B.state = 'loading'; B.err=''; B.pending = qb; compute();
-    // Overpass mirrors are often slow or busy: ask all of them at once, use the first good answer.
-    var left = ENDPOINTS.length, won = false, lastErr = '', ctls = [];
-    ENDPOINTS.forEach(function(url){
-      var ctl = window.AbortController ? new AbortController() : null; if (ctl) ctls.push(ctl);
-      var to = setTimeout(function(){ if (ctl) ctl.abort(); }, 45000);
-      fetch(url, { method:'POST', body:'data='+encodeURIComponent(query), headers:{'Content-Type':'application/x-www-form-urlencoded'}, signal: ctl?ctl.signal:undefined })
-        .then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-        .then(function(j){
-          clearTimeout(to); if (won || my!==B.req) return;
-          if (!j || !Array.isArray(j.elements)) throw new Error('bad response');
-          won = true; ctls.forEach(function(c){ if (c!==ctl) try{ c.abort(); }catch(e){} });
-          B.list = parseOverpass(j); B.box = qb; B.pending = null; B.state='ok'; compute();
-        })
-        .catch(function(e){
-          clearTimeout(to); if (won || my!==B.req) return;
-          lastErr = (e && e.name==='AbortError') ? 'timed out' : (e && e.message || 'network error');
-          if (--left === 0){ B.state='error'; B.pending = null; B.err = lastErr; compute(); }
-        });
+    B.state = 'loading'; B.err=''; B.pending = qb; B.src = { fema:'loading', osm:'loading' }; B.parts = { fema:[], osm:[] }; B.list = [];
+    compute();
+    function settle(){
+      if (my!==B.req) return;
+      var ok = B.src.fema==='ok' || B.src.osm==='ok', busy = B.src.fema==='loading' || B.src.osm==='loading';
+      B.list = B.parts.osm.concat(B.parts.fema);
+      if (ok){ B.state = busy ? 'part' : 'ok'; B.box = qb; }
+      else if (!busy){ B.state = 'error'; B.err = [B.src.femaErr, B.src.osmErr].filter(Boolean).join('; ') || 'network error'; }
+      if (!busy) B.pending = null;
+      compute();
+    }
+    fetchFema(qb).then(function(l){ B.parts.fema = l; B.src.fema = 'ok'; settle(); })
+      .catch(function(e){ B.src.fema = 'error'; B.src.femaErr = 'FEMA ' + errMsg(e); settle(); });
+    fetchOsm(qb).then(function(l){ B.parts.osm = l; B.src.osm = 'ok'; settle(); })
+      .catch(function(e){ B.src.osm = 'error'; B.src.osmErr = 'OSM ' + errMsg(e); settle(); });
+  }
+  // FEMA / Oak Ridge "USA Structures": every US building over ~450 sq ft, traced from imagery. Answers in well under a second.
+  function fetchFema(qb){
+    var q = 'where=1%3D1&geometry=' + [qb.w,qb.s,qb.e,qb.n].map(function(v){return v.toFixed(6);}).join(',') +
+      '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=OBJECTID,BUILD_ID,OCC_CLS,PRIM_OCC' +
+      '&returnGeometry=true&outSR=4326&resultRecordCount=2000&f=json';
+    function attempt(n){
+      return fetchT_(FEMA_URL + '?' + q, {}, 20000).then(function(j){
+        if (!j || j.error || !Array.isArray(j.features)) throw new Error((j && j.error && j.error.message) || 'bad response');
+        return parseEsri(j);
+      }).catch(function(e){ if (n>0) return new Promise(function(r){ setTimeout(r, 1500); }).then(function(){ return attempt(n-1); }); throw e; });
+    }
+    return attempt(1);
+  }
+  function sArea(r){ var a=0; for (var i=0;i<r.length-1;i++) a += r[i][0]*r[i+1][1]-r[i+1][0]*r[i][1]; return a/2; }
+  function pip(pt, ring){ var c=false; for (var i=0,j=ring.length-1;i<ring.length;j=i++){ var a=ring[i], b=ring[j];
+      if (((a[1]>pt[1])!==(b[1]>pt[1])) && (pt[0] < (b[0]-a[0])*(pt[1]-a[1])/(b[1]-a[1]+1e-30)+a[0])) c=!c; } return c; }
+  function parseEsri(j){
+    var out = [];
+    j.features.forEach(function(f){
+      try{
+        var rings = (f.geometry && f.geometry.rings || []).filter(function(r){ return r.length>=4; }).map(function(r){
+          r = r.map(function(p){ return [p[0],p[1]]; }); var a=r[0], b=r[r.length-1]; if (a[0]!==b[0]||a[1]!==b[1]) r.push(a.slice()); return r; });
+        if (!rings.length) return;
+        // Esri: outer rings run clockwise (negative signed area), holes counter-clockwise.
+        var outers = rings.filter(function(r){ return sArea(r) < 0; }), holes = rings.filter(function(r){ return sArea(r) >= 0; });
+        if (!outers.length){ outers = holes; holes = []; }
+        var g = outers.map(function(r){ return [r]; });
+        holes.forEach(function(h){ for (var k=0;k<outers.length;k++){ if (pip(h[0], outers[k])){ g[k].push(h); return; } } });
+        var at = f.attributes || {};
+        out.push({ id: 'f'+(at.BUILD_ID || at.OBJECTID), src:'fema', name: at.PRIM_OCC && at.PRIM_OCC !== 'Unclassified' ? at.PRIM_OCC : '', kind: at.OCC_CLS || 'building', geom: g });
+      }catch(e){}
     });
+    return out;
+  }
+  // OpenStreetMap: race the Overpass mirrors (often overloaded), then fall back to the main OSM API, which is quick for one small lot.
+  function fetchOsm(qb){
+    var bb = [qb.s,qb.w,qb.n,qb.e].map(function(v){return v.toFixed(6);}).join(',');
+    var query = '[out:json][timeout:20];(way["building"]('+bb+');relation["building"]('+bb+'););out geom;';
+    var my = B.req;
+    return new Promise(function(resolve, reject){
+      var left = ENDPOINTS.length, won = false;
+      ENDPOINTS.forEach(function(url){
+        fetchT_(url, { method:'POST', body:'data='+encodeURIComponent(query), headers:{'Content-Type':'application/x-www-form-urlencoded'} }, 15000)
+          .then(function(j){ if (!j || !Array.isArray(j.elements)) throw new Error('bad response'); if (!won){ won = true; resolve(parseOverpass(j)); } })
+          .catch(function(){ if (--left === 0 && !won) reject(new Error('Overpass busy')); });
+      });
+    }).catch(function(){
+      if (my !== B.req) throw new Error('cancelled');
+      var url = OSM_API + '?bbox=' + [qb.w,qb.s,qb.e,qb.n].map(function(v){return v.toFixed(6);}).join(',');
+      return fetchT_(url, { headers:{ 'Accept':'application/json' } }, 20000).then(function(j){
+        if (!j || !Array.isArray(j.elements)) throw new Error('bad response');
+        return parseOverpass(osmApiToGeom(j));
+      });
+    });
+  }
+  function osmApiToGeom(j){
+    var nodes = {}, ways = {}, els = [];
+    j.elements.forEach(function(e){ if (e.type==='node') nodes[e.id] = { lat:e.lat, lon:e.lon }; });
+    j.elements.forEach(function(e){ if (e.type==='way'){ var g = e.nodes.map(function(id){ return nodes[id]; }); if (g.every(Boolean)) ways[e.id] = g; } });
+    j.elements.forEach(function(e){
+      if (!e.tags || !e.tags.building) return;
+      if (e.type==='way' && ways[e.id]) els.push({ type:'way', id:e.id, tags:e.tags, geometry:ways[e.id] });
+      else if (e.type==='relation') els.push({ type:'relation', id:e.id, tags:e.tags, members:(e.members||[]).map(function(m){ return { type:m.type, role:m.role, geometry: m.type==='way' ? ways[m.ref] : null }; }) });
+    });
+    return { elements: els };
   }
   function joinRings(segs){
     segs = segs.map(function(s){ return s.slice(); }).filter(function(s){ return s.length>1; });
@@ -1404,38 +1485,50 @@ var Measure = (function(){
             if (iR.length && pc){ g = pc.difference(g, iR.map(function(r){return [r];})); }
           }
         }
-        if (g && g.length) out.push({ id: el.type[0]+el.id, name: (el.tags && (el.tags.name || el.tags['addr:housenumber'] && ((el.tags['addr:housenumber']||'')+' '+(el.tags['addr:street']||'')).trim())) || '', kind: el.tags && el.tags.building || 'yes', geom: g });
+        if (g && g.length) out.push({ id: el.type[0]+el.id, src:'osm', name: (el.tags && (el.tags.name || el.tags['addr:housenumber'] && ((el.tags['addr:housenumber']||'')+' '+(el.tags['addr:street']||'')).trim())) || '', kind: el.tags && el.tags.building || 'yes', geom: g });
       }catch(e){}
     });
     return out;
   }
 
   /* area + clipping */
+  function manualList(){
+    return (MS.manual||[]).map(function(m){
+      var r = m.pts.map(function(p){ return [p[1], p[0]]; }); r.push(r[0].slice());
+      return { id:m.id, src:'manual', name:'Drawn building', kind:'manual', geom:[[r]] };
+    });
+  }
   function compute(){
     if (!map) return;
     setRef();
     var lr = pts.length>=3 ? lotRing() : [];
     var lotM2 = lr.length>=3 ? ringArea(lr) : 0;
-    var removedM2 = 0, count = 0, drawn = []; res.ign = 0;
-    if (closed && lr.length>=3 && B.state==='ok' && B.list.length){
-      var lotG = [[lr]], active = [];
-      B.list.forEach(function(b){
+    var removedM2 = 0, count = 0, drawn = [], by = { osm:0, fema:0, manual:0 }; res.ign = 0;
+    var list = manualList().concat((B.state==='ok' || B.state==='part') ? B.list : []);
+    if (closed && lr.length>=3 && list.length && pc){
+      var lotG = [[lr]], active = [], taken = [];
+      list.forEach(function(b){
         var pg = projGeom(b.geom), clip = null, a = 0;
-        try{ clip = pc ? pc.intersection(lotG, pg) : null; a = mpArea(clip); }catch(e){ clip = null; a = 0; }
-        if (a > 0.05){
-          var ign = MS.ignored.indexOf(b.id) >= 0;
-          drawn.push({ b:b, clip:clip, a:a, ign:ign });
-          if (!ign){ active.push(pg); count++; } else res.ign++;
+        try{ clip = pc.intersection(lotG, pg); a = mpArea(clip); }catch(e){ clip = null; a = 0; }
+        if (!(a > 0.05)) return;
+        // The same building often comes from both FEMA and OSM: keep the first one (drawn, then OSM, then FEMA).
+        if (b.src!=='manual' && taken.length){
+          var ov = 0; try{ ov = mpArea(pc.intersection(clip, pc.union.apply(null, taken))); }catch(e){ ov = 0; }
+          if (ov > 0.5*a) return;
         }
+        taken.push(clip);
+        var ign = MS.ignored.indexOf(b.id) >= 0;
+        drawn.push({ b:b, clip:clip, a:a, ign:ign });
+        if (!ign){ active.push(clip); count++; by[b.src] = (by[b.src]||0)+1; } else res.ign++;
       });
       if (active.length){
-        try{ var u = pc.intersection(lotG, pc.union.apply(null, active)); removedM2 = mpArea(u); }
+        try{ removedM2 = mpArea(pc.union.apply(null, active)); }
         catch(e){ removedM2 = 0; drawn.forEach(function(d){ if (!d.ign) removedM2 += d.a; }); }
       }
       removedM2 = Math.min(removedM2, lotM2);
     }
     res.lot = Math.round(lotM2*M2FT); res.removed = Math.round(removedM2*M2FT);
-    res.net = Math.max(0, res.lot - res.removed); res.count = count;
+    res.net = Math.max(0, res.lot - res.removed); res.count = count; res.by = by;
     drawBuildings(drawn);
     refreshStats();
   }
@@ -1443,8 +1536,11 @@ var Measure = (function(){
     bLayer.clearLayers();
     drawn.forEach(function(d){
       var latlngs = d.clip.map(function(poly){ return poly.map(function(ring){ return ring.map(function(p){ return toLL(p[0],p[1]); }); }); });
-      var lyr = L.polygon(latlngs, { color:'#ff9f43', weight:2, fillOpacity:1, className:'bldg-path'+(d.ign?' ign':''), bubblingMouseEvents:false });
-      lyr.bindTooltip((d.b.name ? d.b.name+' · ' : 'Building · ') + fmt(Math.round(d.a*M2FT)) + ' sq ft' + (d.ign ? ' — ignored, tap to subtract again' : ' removed — tap to ignore'), { sticky:true });
+      var lyr = L.polygon(latlngs, { color:'#ff9f43', weight:2, fillOpacity:1, className:'bldg-path'+(d.ign?' ign':'')+(d.b.src==='manual'?' man':''), bubblingMouseEvents:false });
+      var srcLbl = d.b.src==='manual' ? 'drawn by you' : d.b.src==='fema' ? 'FEMA' : 'OpenStreetMap';
+      var tip = (d.b.name ? d.b.name+' · ' : 'Building · ') + fmt(Math.round(d.a*M2FT)) + ' sq ft (' + srcLbl + ')' +
+        (d.b.src==='manual' ? ' — tap to delete' : d.ign ? ' — ignored, tap to subtract again' : ' removed — tap to ignore');
+      lyr.bindTooltip(esc(tip), { sticky:true });
       lyr.addTo(bLayer);
       var el = lyr.getElement(); if (el) el.addEventListener('pointerdown', function(e){ press(e, d.b.id); });
     });
@@ -1461,10 +1557,18 @@ var Measure = (function(){
     var bs = $('mbstat'), rb = $('mRetry2');
     rb.style.display = 'none'; bs.style.color = '';
     if (!closed){ bs.textContent = pts.length>=3 ? 'Close the lot to detect buildings.' : ''; }
-    else if (B.state==='loading'){ bs.textContent = 'Loading buildings from OpenStreetMap… (can take 10–30 s)'; }
-    else if (B.state==='error'){ bs.textContent = 'Buildings could not be loaded ('+B.err+'). Showing full lot area — nothing subtracted.'; bs.style.color='var(--warn)'; rb.style.display='inline-flex'; }
-    else if (B.state==='ok'){ bs.textContent = (res.count ? (res.count + ' building' + (res.count===1?'':'s') + ' removed (OpenStreetMap).') : (res.ign ? 'No buildings subtracted.' : 'No mapped buildings inside this lot (OpenStreetMap).')) + (res.ign ? ' ' + res.ign + ' ignored — tap to subtract again.' : ''); }
-    else bs.textContent = '';
+    else if (drawMode){ bs.textContent = dpts.length + ' building corner' + (dpts.length===1?'':'s') + ' placed.'; }
+    else {
+      var by = res.by || {}, parts = [];
+      if (by.osm) parts.push(by.osm + ' OpenStreetMap'); if (by.fema) parts.push(by.fema + ' FEMA'); if (by.manual) parts.push(by.manual + ' drawn');
+      var t = res.count ? (res.count + ' building' + (res.count===1?'':'s') + ' removed (' + parts.join(', ') + ').') : '';
+      if (B.state==='loading') t = (t ? t + ' ' : '') + 'Finding buildings…';
+      else if (B.state==='part') t = (t || 'No buildings found yet.') + ' Still checking ' + (B.src.osm==='loading' ? 'OpenStreetMap' : 'FEMA') + '…';
+      else if (B.state==='error'){ t = (t ? t + ' ' : '') + 'Building outlines could not be loaded (' + B.err + '). Tap “Draw building” to trace one, or Retry.'; bs.style.color='var(--warn)'; rb.style.display='inline-flex'; }
+      else if (B.state==='ok' && !res.count) t = res.ign ? 'No buildings subtracted.' : 'No buildings found inside this lot. If one is there, tap “Draw building” and trace it.';
+      if (res.ign) t += ' ' + res.ign + ' ignored — tap to subtract again.';
+      bs.textContent = t;
+    }
     help();
   }
 
@@ -1497,12 +1601,13 @@ var Measure = (function(){
   }
   function clearLot(){
     markers.forEach(function(m){ map.removeLayer(m); }); markers=[]; pts=[]; closed=false;
-    B.req++; B.state='idle'; MS.ignored=[]; st(''); redraw();
+    if (drawMode) setDrawMode(false);
+    B.req++; B.state='idle'; MS.ignored=[]; MS.manual=[]; st(''); redraw();
   }
 
   /* whole-lot drag (pointer events: mouse + touch) */
   function press(e, bid){
-    if (!closed || (e.button!==undefined && e.button!==0)) return;
+    if (!closed || drawMode || (e.button!==undefined && e.button!==0)) return;
     e.stopPropagation(); e.preventDefault();
     map.dragging.disable();
     var start = map.mouseEventToLatLng(e), sx=e.clientX, sy=e.clientY, orig = pts.map(function(p){ return L.latLng(p.lat,p.lng); }), moved=false;
@@ -1523,9 +1628,43 @@ var Measure = (function(){
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
   }
   function toggleIgnore(id){
+    if (String(id).charAt(0)==='m'){
+      if (!confirm('Delete this drawn building?')) return;
+      MS.manual = MS.manual.filter(function(m){ return m.id!==id; }); saveM(); compute(); toast('Drawn building deleted'); return;
+    }
     var i = MS.ignored.indexOf(id);
     if (i>=0){ MS.ignored.splice(i,1); toast('Building subtracted again'); } else { MS.ignored.push(id); toast('Building ignored — its area counts as pushable'); }
     saveM(); compute();
+  }
+
+  /* manual building cut-outs */
+  function setDrawMode(on){
+    drawMode = on; dpts = [];
+    dmarkers.forEach(function(m){ map.removeLayer(m); }); dmarkers = [];
+    if (dline){ dline.setLatLngs([]); }
+    map.getContainer().classList.toggle('mode-building', on);
+    $('mBldg').classList.toggle('on', on);
+    $('mBldgBar').classList.toggle('on', on);
+    st(on ? 'Drawing a building: tap its corners.' : '');
+    refreshStats();
+  }
+  function drawDraft(){
+    if (!dline) dline = L.polygon([], { color:'#ff9f43', weight:2, dashArray:'5 5', fillColor:'#ff9f43', fillOpacity:.25, interactive:false }).addTo(map);
+    dline.setLatLngs(dpts);
+    dmarkers.forEach(function(m,i){ var el=m.getElement(); if (el && el.firstChild) el.firstChild.className = 'vtx b' + (i===0 ? ' first' : ''); });
+    refreshStats();
+  }
+  function addBPoint(ll){
+    var icon = L.divIcon({ className:'', html:'<div class="vtx b"></div>', iconSize:[0,0] });
+    var m = L.marker(ll, { draggable:true, icon:icon, keyboard:false }).addTo(map);
+    m.on('drag', function(){ dpts[dmarkers.indexOf(m)] = m.getLatLng(); drawDraft(); });
+    m.on('click', function(e){ L.DomEvent.stopPropagation(e); if (dmarkers.indexOf(m)===0 && dpts.length>=3) finishBuilding(); });
+    dmarkers.push(m); dpts.push(L.latLng(ll)); drawDraft();
+  }
+  function finishBuilding(){
+    if (dpts.length<3){ st('Tap at least 3 building corners.'); return; }
+    MS.manual.push({ id:'m'+Date.now().toString(36), pts: dpts.map(function(p){ return [p.lat, p.lng]; }) });
+    setDrawMode(false); saveM(); compute(); toast('Building cut out of the lot');
   }
 
   /* search */
@@ -1556,7 +1695,7 @@ var Measure = (function(){
     line = L.polyline([], { color:'#7fd3ff', weight:3, dashArray:'6 6', interactive:false }).addTo(map);
     bLayer = L.layerGroup().addTo(map);
     var pel = poly.getElement(); if (pel) pel.addEventListener('pointerdown', function(e){ press(e, null); });
-    map.on('click', function(e){ if (closed){ st('Lot is closed. Drag it or its corners, or Clear lot to start over.'); return; } st(''); addPoint(e.latlng); });
+    map.on('click', function(e){ if (drawMode){ addBPoint(e.latlng); return; } if (closed){ st('Lot is closed. Drag it or its corners, or Clear lot to start over.'); return; } st(''); addPoint(e.latlng); });
     map.on('moveend', saveM);
     (MS.pts||[]).forEach(function(p){ addPoint(p, true); });
     closed = !!MS.closed && pts.length>=3;
@@ -1566,9 +1705,13 @@ var Measure = (function(){
   }
 
   $('searchForm').addEventListener('submit', function(e){ e.preventDefault(); if (map) search($('addr').value); });
-  $('mUndo').onclick = function(){ if (!map) return; if (closed){ closed=false; B.req++; B.state='idle'; redraw(); st('Shape reopened.'); return; } removePoint(markers.length-1); };
+  $('mUndo').onclick = function(){ if (!map) return; if (drawMode){ $('mBldgUndo').onclick(); return; } if (closed){ closed=false; B.req++; B.state='idle'; redraw(); st('Shape reopened.'); return; } removePoint(markers.length-1); };
   $('mCloseShape').onclick = function(){ if (map) closeShape(); };
   $('mClear').onclick = function(){ if (!map) return; if (pts.length>2 && !confirm('Clear the lot outline?')) return; clearLot(); };
+  $('mBldg').onclick = function(){ if (!map) return; if (drawMode){ finishBuilding(); return; } if (!closed){ st('Close the lot first, then draw buildings inside it.'); return; } setDrawMode(true); };
+  $('mBldgDone').onclick = function(){ if (map) finishBuilding(); };
+  $('mBldgX').onclick = function(){ if (map) setDrawMode(false); };
+  $('mBldgUndo').onclick = function(){ if (!map || !dmarkers.length) return; map.removeLayer(dmarkers.pop()); dpts.pop(); drawDraft(); };
   $('mRetry').onclick = $('mRetry2').onclick = function(){ if (!map) return; if (!closed){ st('Close the lot first.'); return; } ensureBuildings(true); };
   $('mRestore').onclick = function(){ MS.ignored = []; saveM(); compute(); toast('Ignored buildings restored'); };
   $('mYard').onclick = function(){ if (map) map.setView(YARD_LL, 18); };
@@ -1577,13 +1720,14 @@ var Measure = (function(){
     if (!map || pts.length<3){ st('Trace the lot first (at least 3 corners).'); return; }
     if (!closed) closeShape();
     Q.sqft = res.net;
-    Q.sqftSrc = 'From map: ' + fmt(res.lot) + ' lot − ' + fmt(res.removed) + ' buildings' + (B.state==='ok' ? '' : ' (buildings not loaded)');
+    var bOk = B.state==='ok' || B.state==='part' || (MS.manual||[]).length;
+    Q.sqftSrc = 'From map: ' + fmt(res.lot) + ' lot − ' + fmt(res.removed) + ' buildings' + (bOk ? '' : ' (buildings not loaded)');
     Q.hours = Math.round(suggestedHours(res.net)*100)/100;
     Q.cls = suggestLot(res.net);
     Q.lotPts = pts.map(function(p){ return [p.lat, p.lng]; }); QR.lotChanged();
     if (!String(Q.addr).trim() && MS.lastAddr) Q.addr = MS.lastAddr;
     saveQ(); go('quote');
-    toast(B.state==='ok' ? ('Net ' + fmt(res.net) + ' sq ft → ' + fmt(Q.hours,2) + ' hr') : 'Buildings not loaded — full lot area used');
+    toast(bOk ? ('Net ' + fmt(res.net) + ' sq ft → ' + fmt(Q.hours,2) + ' hr') : 'Buildings not loaded — full lot area used');
   };
 
   return {

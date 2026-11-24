@@ -1,5 +1,5 @@
 /* ICT Snow Removal service worker. Bump VERSION on every release so old caches get cleared. */
-var VERSION = 'ict-snow-v2';
+var VERSION = 'ict-snow-v3';
 var SHELL_CACHE = VERSION + '-shell';
 var ASSET_CACHE = VERSION + '-assets';
 
